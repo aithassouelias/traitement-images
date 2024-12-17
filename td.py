@@ -1,56 +1,90 @@
 import cv2
 import numpy as np
 
-# Charger le classificateur en cascade pour la détection de visage
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+# Charger les classificateurs Haar pour les visages et les yeux
+face_cascade = cv2.CascadeClassifier('./haarcascades/haarcascade_frontalface_alt.xml')
+eye_cascade = cv2.CascadeClassifier('./haarcascades/haarcascade_eye_tree_eyeglasses.xml')
 
-# Ouvrir la webcam
-cap = cv2.VideoCapture(0)
+# Charger la vidéo et les images des accessoires
+video = cv2.VideoCapture(0)
+santa_hat = cv2.imread('./images/chapeau.png', -1)  # Bonnet avec canal alpha
+sunglasses = cv2.imread('./images/sunglasses.png', -1)  # Lunettes avec canal alpha
 
-# Charger l'image de la barbe (assurez-vous que l'image est transparente PNG)
-beard_img = cv2.imread('./images/beard.png', cv2.IMREAD_UNCHANGED)
+# Variables pour activer/désactiver les filtres
+show_hat = True
+show_glasses = True
 
-while True:
-    # Lire une image depuis la webcam
-    ret, frame = cap.read()
+# Gestionnaire d'événements pour détecter les clics de souris
+def mouse_event(event, x, y, flags, param):
+    global show_hat, show_glasses
+    height, width = param['frame_height'], param['frame_width']
+    
+    # Vérifier si un clic a lieu sur les boutons
+    if event == cv2.EVENT_LBUTTONDOWN:
+        if 10 <= x <= 110 and height - 80 <= y <= height - 40:  # Bouton "Bonnet"
+            show_hat = not show_hat
+        elif 10 <= x <= 110 and height - 40 <= y <= height:  # Bouton "Lunettes"
+            show_glasses = not show_glasses
+
+# Créer la fenêtre pour afficher la vidéo
+cv2.namedWindow('Esprit de Noël')
+
+while video.isOpened():
+    # Lire une frame de la vidéo
+    ret, frame = video.read()
     if not ret:
         break
 
-    # Convertir l'image en niveaux de gris pour la détection de visage
+    # Convertir la frame en niveaux de gris pour la détection
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    # Détecter les visages dans l'image
-    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+    # Détection des visages
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4)
 
-    # Pour chaque visage détecté
+    # Dimensions de la frame
+    height, width, _ = frame.shape
+
+    # Dessiner les boutons
+    cv2.rectangle(frame, (10, height - 80), (110, height - 40), (0, 255, 0), -1)
+    cv2.putText(frame, 'Bonnet', (15, height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+    cv2.rectangle(frame, (10, height - 40), (110, height), (0, 255, 255), -1)
+    cv2.putText(frame, 'Lunettes', (15, height - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+
     for (x, y, w, h) in faces:
-        # Définir les dimensions de la barbe (ajustez selon votre image de barbe)
-        beard_width = w
-        beard_height = int(beard_width / beard_img.shape[1] * beard_img.shape[0])
+        # --------- BONNET ---------
+        if show_hat:
+            resized_santa_hat = cv2.resize(santa_hat, (w, int(w * santa_hat.shape[0] / santa_hat.shape[1])))
+            hat_height, hat_width, _ = resized_santa_hat.shape
 
-        # Redimensionner l'image de la barbe
-        beard_resized = cv2.resize(beard_img, (beard_width, beard_height))
+            hat_top_y = max(y - int(h / 3), 0)  # Positionner légèrement au-dessus des sourcils
+            roi_hat = frame[hat_top_y:hat_top_y + hat_height, x:x + hat_width]
 
-        # Obtenir les coordonnées pour superposer la barbe
-        x_offset = x
-        y_offset = y + int(h / 1.5)  # Positionner la barbe sous le menton
+            for i in range(hat_height):
+                for j in range(hat_width):
+                    if resized_santa_hat[i, j, 3] != 0:  # Vérifier si le pixel n'est pas transparent
+                        roi_hat[i, j] = resized_santa_hat[i, j, :3]
 
-        # Extraire les canaux de l'image de la barbe (RGBA)
-        beard_alpha = beard_resized[:, :, 3] / 255.0  # Canal alpha (transparence)
+        # --------- LUNETTES ---------
+        if show_glasses:
+            resized_sunglasses = cv2.resize(sunglasses, (w, h // 3))
+            sg_height, sg_width, _ = resized_sunglasses.shape
+            roi = frame[y + h // 4:y + h // 4 + sg_height, x:x + sg_width]
 
-        # Superposer la barbe sur l'image du visage
-        for c in range(0, 3):
-            frame[y_offset:y_offset+beard_height, x_offset:x_offset+beard_width, c] = \
-                (1. - beard_alpha) * frame[y_offset:y_offset+beard_height, x_offset:x_offset+beard_width, c] + \
-                beard_alpha * beard_resized[:, :, c]
+            for i in range(sg_height):
+                for j in range(sg_width):
+                    if resized_sunglasses[i, j, 3] != 0:  # Vérifier si le pixel n'est pas transparent
+                        roi[i, j] = resized_sunglasses[i, j, :3]
 
-    # Afficher l'image avec la barbe ajoutée
-    cv2.imshow('Face with Beard', frame)
+    # Définir les dimensions de la frame pour les événements
+    cv2.setMouseCallback('Esprit de Noël', mouse_event, param={'frame_height': height, 'frame_width': width})
+    
+    # Afficher la vidéo avec les accessoires incrustés
+    cv2.imshow('Esprit de Noël', frame)
 
-    # Quitter avec la touche 'q'
+    # Quitter si la touche 'q' est pressée
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# Libérer la caméra et fermer les fenêtres
-cap.release()
+# Libérer les ressources
+video.release()
 cv2.destroyAllWindows()
